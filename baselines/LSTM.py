@@ -14,7 +14,7 @@ class LSTM(nn.Module):
         self.hidden_size = 1024
         self.num_layers = 3
 
-        # 初始化嵌入矩阵
+        # initialize embedding matrix
         self.emb_loc = nn.Embedding(num_embeddings=n_vocab, embedding_dim=self.loc_dim)
 
         self.lstm = nn.LSTM(
@@ -26,7 +26,7 @@ class LSTM(nn.Module):
         self.fc = nn.Linear(self.hidden_size, n_vocab)
 
     def forward(self, loc, prev_state):
-        # 拼接嵌入矩阵
+        # location embedding
         loc_emb = torch.squeeze(self.emb_loc(loc))
 
         output, state = self.lstm(loc_emb, prev_state)
@@ -55,11 +55,9 @@ class Dataset():
         return sorted(word_counts, key=word_counts.get, reverse=True)
 
     def __len__(self):
-        """返回数据集当中的样本个数"""
         return len(self.words_indexes)
 
     def __getitem__(self, index):
-        """返回样本集中的第 index 个样本；输入变量在前，输出变量在后"""
         return (torch.tensor(self.words_indexes[index][:-1]),
                 torch.tensor(self.words_indexes[index][1:]))
 
