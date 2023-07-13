@@ -127,44 +127,15 @@ def weighted_random_selection(weights):
 
 class Act2Loc:
     def __init__(self):
-        self.rho = 0.6
-        self.gamma = 0.21
-
-        self.beta = 0.8
-        self.tau = 17
-
-    def __frequency_return(self):
-        index = weighted_random_selection(list(self.location2visits.values()))
-        next_location = list(self.location2visits.keys())[index]
-        return next_location
-
-    def __preferential_exploration(self, current_location):
-        next_location = weighted_random_selection(self.od_matrix[current_location])
-        while next_location in self.other.values():
-            next_location = weighted_random_selection(self.od_matrix[current_location])
-        return next_location
-
-    def choose_location(self):
-        S = len(self.location2visits)  # number of already visited locations
-
-        if S == 0:  # home
-            return self.__preferential_exploration(self.home)
-
-        current_location = self.trajectory[-1]
-        return self.__preferential_exploration(current_location)
-
-
-    def move(self, home=None, work=None, diary_mobility=None, spatial_tessellation=None,
-             od_matrix=None, location_set=None, walk_nums=0):
-
-        self.od_matrix = od_matrix
         self.trajectory = []
         self.location2visits = defaultdict(int)
         self.other = defaultdict(int)
 
+    def move(self, home=None, work=None, diary_mobility=None, spatial_tessellation=None,
+             od_matrix=None, location_set=None, walk_nums=0):
+        self.od_matrix = od_matrix
         self.diary_mobility = np.array(diary_mobility)
         self.home = home
-
         self.location_set = location_set
 
         if "W" in set(self.diary_mobility):
@@ -197,7 +168,7 @@ class Act2Loc:
             self.trajectory.append(next_location)
             i += 1
 
-        # *******************Number the "Other" in the order they appear.*********************
+        # *******************Number the home, work and other labels with grid id.*********************
         cnt = 0
         self.mobility = []
         for i in self.diary_mobility:
@@ -206,7 +177,7 @@ class Act2Loc:
             elif i == 'W':
                 location = self.work
             else:
-                location = self.other[i]  # self.frequency[int(i)][0]
+                location = self.other[i]
             self.mobility.append(location)
 
         return self.mobility
@@ -248,7 +219,7 @@ if __name__ == '__main__':
     other_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.01, beta=0.45)
 
 
-    # 3.Load activity type sequences
+    # 3.Load activity type sequences(The whole dataset is not disclosed due to the privacy issue.)
     activity = []
     with open("activity.pkl", "rb") as f:
         activity_set = pickle.load(f)
