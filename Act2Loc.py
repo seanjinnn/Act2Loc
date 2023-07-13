@@ -21,9 +21,10 @@ import numpy as np
 from tqdm import tqdm
 import math
 import powerlaw
+from math import sqrt, sin, cos, pi, asin, pow, ceil
 
 warnings.filterwarnings('ignore')
-# 人口分布数据选择：
+# 1.Load grids data
 def load_spatial_tessellation(tessellation):
     # relevance: population
     M = 0
@@ -43,8 +44,6 @@ def load_spatial_tessellation(tessellation):
 
     return spatial_tessellation, M
 
-
-
 def generating_list(tdf, days=30):
     user_location = list()
     location = list()
@@ -56,7 +55,6 @@ def generating_list(tdf, days=30):
     user_location.append(location)
     return user_location
 
-from math import sqrt, sin, cos, pi, asin, pow, ceil
 def earth_distance(lat_lng1, lat_lng2):
     lat1, lng1 = [l*pi/180 for l in lat_lng1]
     lat2, lng2 = [l*pi/180 for l in lat_lng2]
@@ -64,9 +62,7 @@ def earth_distance(lat_lng1, lat_lng2):
     ds = 2 * asin(sqrt(sin(dlat/2.0) ** 2 + cos(lat1) * cos(lat2) * sin(dlng/2.0) ** 2))
     return 6371.01 * ds  # spherical earth...
 
-
-
-# compute the origin destination matrix
+# 2. Compute the origin destination matrix
 def radiation_od_matrix(spatial_tessellation, M, alpha=0, beta=1):
     print('Computing origin-destination matrix via radiation model\n')
 
@@ -125,11 +121,11 @@ def radiation_od_matrix(spatial_tessellation, M, alpha=0, beta=1):
 
     return od_matrix
 
-
+# 3. Act2Loc Model
 def weighted_random_selection(weights):
     return np.searchsorted(np.cumsum(weights)[:-1], random())
 
-class dEPR:
+class Act2Loc:
     def __init__(self):
         self.rho = 0.6
         self.gamma = 0.21
@@ -201,11 +197,7 @@ class dEPR:
             self.trajectory.append(next_location)
             i += 1
 
-        # 用sorted函数的key= 参数排序：
-        # 按照value进行排序
-        self.frequency = sorted(self.location2visits.items(), key=lambda d: d[1], reverse=True)
-
-        # *******************按照Other出现顺序*********************
+        # *******************Number the "Other" in the order they appear.*********************
         cnt = 0
         self.mobility = []
         for i in self.diary_mobility:
@@ -220,7 +212,7 @@ class dEPR:
         return self.mobility
 
 def func(diary_mobility):
-    # 步数
+    # The number of unique place of a trajectory
     other_set = set()
     for row in range(len(diary_mobility)):
         if diary_mobility[row] != 'H' and diary_mobility[row] != 'W':
@@ -232,7 +224,6 @@ def func(diary_mobility):
         walk_nums = max(other_set)
 
     work = None
-    # 判断最大外出距离
     location_set = None
 
     od_matrix = other_matrix
@@ -247,41 +238,41 @@ def func(diary_mobility):
 
     return trajectory
 
+if __name__ == '__main__':
+    # 1.load the spatial tessellation
+    tessellation = gpd.read_file(r'data\1km-grids\sz_1km.shp')
+    spatial_tessellation, M = load_spatial_tessellation(tessellation)
+
+    # 2.Compute probability matrix
+    work_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.13, beta=0.61)
+    other_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.01, beta=0.45)
 
 
-# load the spatial tessellation
-tessellation = gpd.read_file(r'data\1km-grids\sz_1km.shp')
-spatial_tessellation, M = load_spatial_tessellation(tessellation)
+    # 3.Load activity type sequences
+    activity = []
+    with open("activity.pkl", "rb") as f:
+        activity_set = pickle.load(f)
 
+    # 4. Choose the number of individuals and their Home
+    individuals = 1000
+    tessellation["pop"] = tessellation["pop"] / (tessellation["pop"].sum() / individuals)
+    tessellation["pop"] = tessellation["pop"].astype("int")
+    home_df = tessellation[["tile_ID", "pop"]]
 
-work_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.13, beta=0.61)
-other_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.01, beta=0.45)
+    # 5. Trajectory Generation
+    trajectory_generator = Act2Loc()
+    synthetic_trajectory = []
+    home_list = []
+    work_list = []
+    for i in tqdm(range(len(home_df))):
+        home = home_df.iloc[i]["tile_ID"]
+        flow = home_df.iloc[i]["pop"]
 
-individuals = 1000
-tessellation["pop"] = tessellation["pop"] / (tessellation["pop"].sum() / individuals)
-tessellation["pop"] = tessellation["pop"].astype("int")
-home_df = tessellation[["tile_ID", "pop"]]
-
-
-activity = []
-
-with open("轨迹生成/LSTM_" + str(i) + ".pkl", "rb") as f:
-    activity_set = pickle.load(f)
-
-
-trajectory_generator = dEPR()
-synthetic_trajectory = []
-home_list = []
-work_list = []
-for i in tqdm(range(len(home_df))):
-    home = home_df.iloc[i]["tile_ID"]
-    flow = home_df.iloc[i]["pop"]
-
-    diary_mobilitys = []
-    for item in range(flow):
-        diary_mobility = choice(activity)
-        diary_mobilitys.append(diary_mobility)
-    synthetic_trajectory.extend(list(map(func, diary_mobilitys)))
+        diary_mobilitys = []
+        for item in range(flow):
+            diary_mobility = choice(activity)
+            diary_mobilitys.append(diary_mobility)
+        synthetic_trajectory.extend(list(map(func, diary_mobilitys)))
 
 
 
