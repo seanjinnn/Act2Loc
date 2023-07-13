@@ -382,7 +382,7 @@ class WEPR():
 def run_wepr(value):
 
     # load the spatial tessellation
-    tessellation = gpd.read_file(r'C:\Users\86152\Desktop\Home\tessellation\shenzhen\sz_1km\sz_1km.shp')
+    tessellation = gpd.read_file(r'..\data\1km-grids\sz_1km.shp')
     spatial_tessellation, M = load_spatial_tessellation(tessellation)
     rank_matrix = rank_od_matrix(spatial_tessellation)
 
@@ -395,13 +395,13 @@ def run_wepr(value):
     tdf = skmob.TrajDataFrame(tdf)
     tdf = compression.compress(tdf)
 
-    pickled = open(r"C:\Users\86152\轨迹生成\dataset\wepr\wepr_1km"+str(value)+".pkl", 'wb')
+    pickled = open(r"wepr_1km"+str(value)+".pkl", 'wb')
     pickle.dump(tdf, pickled)
 
 if __name__ == '__main__':
 
     pool_obj = multiprocessing.Pool()
-    pool_obj.map(run_wepr, range(1, 50))
+    pool_obj.map(run_wepr, range(1, 10))
 
 
 
