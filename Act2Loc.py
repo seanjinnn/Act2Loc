@@ -2,25 +2,25 @@
 #coding:utf-8
 
 # 导入所需的库
-import geopandas as gpd
-import pickle
-import skmob
-import pandas as pd
-import numpy as np
-from shapely import wkt
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from collections import defaultdict
-import operator
-import random
-from random import random, uniform, choice
-from skmob.utils.plot import plot_gdf
-from skmob.measures.evaluation import common_part_of_commuters
-import warnings
-import math
-import powerlaw
-from math import sqrt, sin, cos, pi, asin, pow, ceil
+import geopandas as gpd  # 用于地理数据处理
+import pickle  # 用于数据序列化
+import skmob  # 用于移动对象数据处理
+import pandas as pd  # 用于数据处理
+import numpy as np  # 用于数值计算
+from shapely import wkt  # 用于几何对象处理
+from tqdm import tqdm  # 用于进度条显示
+import matplotlib.pyplot as plt  # 用于绘图
+import matplotlib as mpl  # Matplotlib的基础设置
+from collections import defaultdict  # 用于构建字典
+import operator  # 用于运算符操作
+import random  # 用于生成随机数
+from random import random, uniform, choice  # 随机数生成
+from skmob.utils.plot import plot_gdf  # 用于绘制地理数据
+from skmob.measures.evaluation import common_part_of_commuters  # 用于计算移动对象之间的交集
+import warnings  # 用于警告控制
+import math  # 数学库
+import powerlaw  # 用于幂律分布拟合
+from math import sqrt, sin, cos, pi, asin, pow, ceil  # 数学运算
 
 # 忽略警告
 warnings.filterwarnings('ignore')
@@ -237,7 +237,7 @@ def func(diary_mobility):
 
     home_list.append(home)
     work_list.append(work)
-    trajectory = []
+
     trajectory = trajectory_generator.move(home=home, work=work, diary_mobility=diary_mobility, od_matrix=od_matrix,
                                            location_set=location_set, walk_nums=walk_nums)
 
