@@ -1,16 +1,63 @@
-from WUREPR import *
-import skmob
-import os
-import pickle
-import pandas as pd
-import geopandas as gpd
-from collections import defaultdict
-from skmob.preprocessing import filtering, compression, detection, clustering
-import multiprocessing
-import numpy as np
-from math import sqrt, sin, cos, pi, asin, pow, ceil
-import datetime
+#!/usr/bin/python
+#coding:utf-8
 
+# 导入所需的库
+import geopandas as gpd
+import pickle
+import skmob
+import pandas as pd
+import numpy as np
+from shapely import wkt
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from collections import defaultdict
+import operator
+import random
+from random import random, uniform, choice
+from skmob.utils.plot import plot_gdf
+from skmob.measures.evaluation import common_part_of_commuters
+import warnings
+import math
+import powerlaw
+from math import sqrt, sin, cos, pi, asin, pow, ceil
+
+# 忽略警告
+warnings.filterwarnings('ignore')
+
+# 1. 加载网格数据
+def load_spatial_tessellation(tessellation):
+    # relevance: population
+    M = 0
+    spatial_tessellation = {}
+    f = np.array(tessellation)
+
+    for line in f:
+        i = int(line[0])
+        relevance = int(line[3])
+        if relevance == 0:
+            relevance += 1
+        spatial_tessellation[i] = {'lat': float(line[2]),
+                                    'lon': float(line[1]),
+                                    'relevance': round(relevance)}
+
+        M += relevance
+
+    return spatial_tessellation, M
+
+# 将数据生成为列表
+def generating_list(tdf, days=30):
+    user_location = list()
+    location = list()
+    for i in range(len(tdf)):
+        if i % (days*24) == 0 and i != 0:
+            user_location.append(location)
+            location = list()
+        location.append(tdf[i])
+    user_location.append(location)
+    return user_location
+
+# 计算两点之间的地球距离
 def earth_distance(lat_lng1, lat_lng2):
     lat1, lng1 = [l*pi/180 for l in lat_lng1]
     lat2, lng2 = [l*pi/180 for l in lat_lng2]
@@ -18,37 +65,35 @@ def earth_distance(lat_lng1, lat_lng2):
     ds = 2 * asin(sqrt(sin(dlat/2.0) ** 2 + cos(lat1) * cos(lat2) * sin(dlng/2.0) ** 2))
     return 6371.01 * ds  # spherical earth...
 
-def UO_od_matrix(spatial_tessellation, alpha=0, beta=1, M=0):
+# 2. 计算起始点和目的地的概率矩阵
+def radiation_od_matrix(spatial_tessellation, M, alpha=0, beta=1):
     print('Computing origin-destination matrix via radiation model\n')
 
-    ## 参数使用 beta 构建OD-matrx
     n = len(spatial_tessellation)
-    od_matrix = np.zeros( (n, n) )
+    od_matrix = np.zeros((n, n))
 
     for id_i in tqdm(spatial_tessellation):  # original
-        lat_i, lng_i, m_i = spatial_tessellation[id_i]['lat'], spatial_tessellation[id_i]['lng'], \
+        lat_i, lng_i, m_i = spatial_tessellation[id_i]['lat'], spatial_tessellation[id_i]['lon'], \
                             spatial_tessellation[id_i]['relevance']
 
         edges = []
         probs = []
 
-        # compute the normalization factor
+        # 计算归一化因子
         normalization_factor = 1.0 / (1.0 - m_i / M)
-        #         normalization_factor = 1.0
 
         destinations_and_distances = []
         for id_j in spatial_tessellation:  # destination
             if id_j != id_i:
-                lat_j, lng_j, d_j = spatial_tessellation[id_j]['lat'], spatial_tessellation[id_j]['lng'], \
+                lat_j, lng_j, d_j = spatial_tessellation[id_j]['lat'], spatial_tessellation[id_j]['lon'], \
                                     spatial_tessellation[id_j]['relevance']
-                destinations_and_distances += \
-                    [(id_j, earth_distance((lat_i, lng_i), (lat_j, lng_j)))]
+                destinations_and_distances += [(id_j, earth_distance((lat_i, lng_i), (lat_j, lng_j)))]
 
-        # sort the destinations by distance (from the closest to the farthest)
+        # 根据距离排序目的地
         destinations_and_distances.sort(key=operator.itemgetter(1))
 
         sij = 0.0
-        for id_j, _ in destinations_and_distances:  # T_{ij} = O_i \\frac{1}{1 - \\frac{m_i}{M}}\\frac{m_i m_j}{(m_i + s_{ij})(m_i + m_j + s_{ij})}.
+        for id_j, _ in destinations_and_distances:
             m_j = spatial_tessellation[id_j]['relevance']
 
             if (m_i + sij) * (m_i + sij + m_j) != 0:
@@ -69,157 +114,167 @@ def UO_od_matrix(spatial_tessellation, alpha=0, beta=1, M=0):
             id_j = edges[i][1]
             od_matrix[id_i][id_j] = p_ij
 
-        # normalization by row
-        sum_odm = sum(od_matrix[id_i])     # free constrained
+        # 行归一化
+        sum_odm = np.sum(od_matrix[id_i])  # free constrained
         if sum_odm > 0.0:
             od_matrix[id_i] /= sum_odm  # balanced factor
 
     return od_matrix
 
-# 人口分布数据选择：
-def load_spatial_tessellation(tessellation, model='S-EPR'):
-    # relevance: population
-    M = 0
-    spatial_tessellation = {}
-    f = np.array(tessellation)
+# 3. Act2Loc 模型
+def weighted_random_selection(weights):
+    return np.searchsorted(np.cumsum(weights)[:-1], random())
 
-    for line in f:
-        i = int(line[0])
-        if model == 'S-EPR':
-            relevance = 1
-        else:
-            relevance = int(line[3])
+class Act2Loc:
+    def __init__(self):
+        self.rho = 0.6
+        self.gamma = 0.21
 
-        spatial_tessellation[i] = {'lat': float(line[1]),
-                                    'lng': float(line[2]),
-                                    'relevance': round(relevance)}
+        self.beta = 0.8
+        self.tau = 17
 
-        M += relevance
+        self.other = defaultdict(int)
 
-    return spatial_tessellation, M
+    # 返回频率最高的地点
+    def __frequency_return(self):
+        index = weighted_random_selection(list(self.location2visits.values()))
+        next_location = list(self.location2visits.keys())[index]
+        return next_location
 
+    # 优先选择探索未访问过的地点
+    def __preferential_exploration(self, current_location):
+        next_location = weighted_random_selection(self.od_matrix[current_location])
+        while next_location in self.other.values():
+            next_location = weighted_random_selection(self.od_matrix[current_location])
+        return next_location
 
-def generating_mobility(trajectory, start_date, uid, spatial_tessellation):
-    current_date = start_date
-    V = trajectory
+    # 选择下一个地点
+    def choose_location(self):
+        S = len(self.location2visits)  # 已访问地点数
 
-    uid_list, date_list, tile_list, lat_list, lng_list = [], [], [], [], []
-    for v in V:
-        uid_list.append(uid)
-        date_list.append(current_date)
-        tile_list.append(v)
-        lat_list.append(spatial_tessellation[v]['lat'])
-        lng_list.append(spatial_tessellation[v]['lng'])
-        # D.append([uid, current_date, v, spatial_tessellation[v]['lat'], spatial_tessellation[v]['lon']])
-        current_date += datetime.timedelta(hours=1)   # datetime compute
-    return uid_list, date_list, tile_list, lat_list, lng_list
+        if S == 0:  # 初始位置为家
+            return self.__preferential_exploration(self.home)
 
-def generating_traj(trajectory, spatial_tessellation, start_date):
-    user = len(trajectory)
-    current_date = start_date
+        current_location = self.trajectory[-1]
+        return self.__preferential_exploration(current_location)
 
-    uid_list, date_list, tile_list, lat_list, lng_list = [], [], [], [], []
-    for uid in tqdm(np.arange(user)):
-        # generate mobility diary
-        uid_, date_, tile_, lat_, lng_ = generating_mobility(trajectory[uid], current_date, uid, spatial_tessellation)
+    # 生成轨迹
+    def move(self, home=None, work=None, diary_mobility=None, spatial_tessellation=None,
+             od_matrix=None, location_set=None, walk_nums=0):
 
-        uid_list.extend(uid_)
-        date_list.extend(date_)
-        tile_list.extend(tile_)
-        lat_list.extend(lat_)
-        lng_list.extend(lng_)
+        self.od_matrix = od_matrix
+        self.trajectory = []
+        self.location2visits = defaultdict(int)
+        self.other = defaultdict(int)
 
-    traj = pd.DataFrame()
-    traj["uid"] = uid_list
-    traj["datetime"] = date_list
-    traj["cluster"] = tile_list
-    traj["lat"] = lat_list
-    traj["lng"] = lng_list
+        self.diary_mobility = np.array(diary_mobility)
+        self.home = home
+        self.location_set = location_set
 
-    return traj
+        if "W" in set(self.diary_mobility):
+            self.work = work
 
-def run():
+            self.od_matrix[self.home][self.work] = 0  # 家 -> 工作地
+            sum_odm = np.sum(od_matrix[self.home])
+            if sum_odm > 0.0:
+                self.od_matrix[self.home] /= sum_odm
 
-    createVar = locals()
+            self.od_matrix[self.work][self.home] = 0  # 工作地 -> 家
+            sum_odm = np.sum(od_matrix[self.work])
+            if sum_odm > 0.0:
+                self.od_matrix[self.work] /= sum_odm
 
-    locations = ["shenzhen", "wuhan", "shanghai"] # "NYC", "TKY", "london",
-    models = ['WRU-EPR']
-
-    for location in locations:
-        tessellation = gpd.read_file(
-            "C:/Users/86152/Desktop/tessellation/" + location + "/" + location + "_1km/" + location + ".shp")
-
-        if location == 'shenzhen':
-            start_date = pd.to_datetime('2021-11-01 00:00:00')
-            x, y = 0.01, 0.16
-            beta, tau = 1.00, 0.0128
-            days = 30
-            nums = 50000
-            type = "Mobile"
-        elif location == 'wuhan':
-            start_date = pd.to_datetime('2019-10-01 00:00:00')
-            x, y = 0.00, 0.08
-            beta, tau = 1.000, 0.0131
-            days = 31
-            nums = 50000
-            type = "Mobile"
-        elif location == 'shanghai':
-            start_date = pd.to_datetime('2023-11-01 00:00:00')
-            x, y = 0.00, 0.08
-            beta, tau = 1.000, 0.0174
-            days = 30
-            nums = 50000
-            type = "Mobile"
-        elif location == 'NYC':
-            start_date = pd.to_datetime('2012-04-01 00:00:00')
-            x, y = 0.00, 0.12
-            beta, tau = 1.000, 0.0037
-            days = 30+31+30+31+31+30+31+30+31
-            nums = 1083
-            type = 'Check_in'
-        elif location == 'TKY':
-            start_date = pd.to_datetime('2012-04-01 00:00:00')
-            x, y = 0.00, 0.12
-            beta, tau = 1.000, 0.0037
-            days = 30+31+30+31+31+30+31+30+31
-            nums = 2293
-            type = 'Check_in'
-        elif location == 'london':
-            start_date = pd.to_datetime('2012-08-01 00:00:00')
-            x, y = 0.00, 0.12
-            beta, tau = 1.000, 0.0015
-            days = 31+30+31+30+31
-            nums = 11435
-            type = 'Check_in'
-
-        for model in models:
-            file_path = location+"_od/"+location+"_" + str(round(x, 2)) + "_" + str(round(y, 2)) + ".pkl"
-            spatial_tessellation, M = load_spatial_tessellation(tessellation, model=location)
-
-            if os.path.exists(file_path):
-                with open(file_path, 'rb') as f:
-                    od_matrix = pickle.load(f)
+        i = 0
+        while i < len(self.diary_mobility):
+            if self.diary_mobility[i] == 'H':
+                next_location = self.home
+            elif self.diary_mobility[i] == 'W':
+                next_location = self.work
             else:
-                od_matrix = UO_od_matrix(spatial_tessellation, alpha=x, beta=y, M=M)
-                with open(file_path, 'wb') as f:
-                    pickle.dump(od_matrix, f)
+                if len(self.other) == 0 or self.diary_mobility[i] not in self.other.keys():
+                    next_location = self.choose_location()
+                    self.other[self.diary_mobility[i]] = next_location
+                else:
+                    next_location = self.other[self.diary_mobility[i]]
 
-            trajectory_generator = WUR_EPR(beta, tau, type)
-            trajectory = []
-            for i in tqdm(range(nums)):
-                synthetic_trajectory = trajectory_generator.move(spatial_tessellation=spatial_tessellation,
-                                                                 od_matrix=od_matrix, days=days)
-                trajectory.append(synthetic_trajectory)
+            self.trajectory.append(next_location)
+            i += 1
 
-            tdf = generating_traj(trajectory, spatial_tessellation, start_date)
-            tdf = skmob.TrajDataFrame(tdf)
-            tdf = compression.compress(tdf)
+        # 根据访问频率排序
+        self.frequency = sorted(self.location2visits.items(), key=lambda d: d[1], reverse=True)
 
-        with open(location + "_result/" + model + ".pkl", 'wb') as f:
-            pickle.dump(tdf, f)
-        f.close()
+        cnt = 0
+        self.mobility = []
+        for i in self.diary_mobility:
+            if i == 'H':
+                location = self.home
+            elif i == 'W':
+                location = self.work
+            else:
+                location = self.other[i]
+            self.mobility.append(location)
+
+        return self.mobility
+
+# 处理轨迹生成
+def func(diary_mobility):
+    other_set = set()
+    for row in range(len(diary_mobility)):
+        if diary_mobility[row] != 'H' and diary_mobility[row] != 'W':
+            other_set.add(diary_mobility[row])
+    other_set = sorted(other_set)
+
+    walk_nums = 0
+    if (len(other_set) > 0):
+        walk_nums = max(other_set)
+
+    work = None
+    location_set = None
+
+    od_matrix = other_matrix
+    if 'W' in diary_mobility:
+        work = weighted_random_selection(work_matrix[home])
+
+    home_list.append(home)
+    work_list.append(work)
+    trajectory = []
+    trajectory = trajectory_generator.move(home=home, work=work, diary_mobility=diary_mobility, od_matrix=od_matrix,
+                                           location_set=location_set, walk_nums=walk_nums)
+
+    return trajectory
 
 if __name__ == '__main__':
+    # 1. 加载空间划分数据
+    tessellation = gpd.read_file(r'data\1km-grids\sz_1km.shp')
+    spatial_tessellation, M = load_spatial_tessellation(tessellation)
 
-    run()
+    # 2. 计算概率矩阵
+    work_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.13, beta=0.61)
+    other_matrix = radiation_od_matrix(spatial_tessellation, M, alpha=0.01, beta=0.45)
 
+    # 3. 加载活动类型序列（由于隐私问题，真实数据集未公开，替换activity.pkl为生成数据即可）
+    activity = []
+    with open("activity.pkl", "rb") as f:
+        activity_set = pickle.load(f)
+
+    # 4. 选择个体数量和居住地
+    individuals = 1000
+    tessellation["pop"] = tessellation["pop"] / (tessellation["pop"].sum() / individuals)
+    tessellation["pop"] = tessellation["pop"].astype("int")
+    home_df = tessellation[["tile_ID", "pop"]]
+
+    # 5. 生成轨迹
+    diary_mobilitys = []
+    trajectory_generator = Act2Loc()
+    synthetic_trajectory = []
+    home_list = []
+    work_list = []
+    for i in tqdm(range(len(home_df))):
+        home = home_df.iloc[i]["tile_ID"]
+        flow = home_df.iloc[i]["pop"]
+
+        for item in range(flow):
+            diary_mobility = choice(activity_set)
+            diary_mobilitys.append(diary_mobility)
+
+        synthetic_trajectory.extend(list(map(func, diary_mobilitys)))
