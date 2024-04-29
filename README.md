@@ -1,7 +1,7 @@
 # Methods
   ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/Act2Loc.png)
-  ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/Trajectory%20Visualization.png)
 # Results
+  ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/Trajectory%20Visualization.png)
   ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/flow(Shenzhen).png)
   ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/flow(Act2Loc).png)
 # Baselines
