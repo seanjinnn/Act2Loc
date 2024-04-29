@@ -1,3 +1,6 @@
+# Results
+  ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/flow(Shenzhen).png)
+  ![Image](https://github.com/seanjinnn/Act2Loc/blob/main/flow(Act2Loc).png)
 # Baselines
 - LSTM: This model directly predicts the next locations based on the LSTM network, and the prediction results are utilized as the synthesized trajectories.
 Directory: baselines/LSTM.py
